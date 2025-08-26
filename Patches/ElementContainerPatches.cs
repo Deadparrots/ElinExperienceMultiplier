@@ -11,7 +11,7 @@ public class ElementContainerPatches
 {
     [HarmonyPrefix]
     [HarmonyPatch(typeof(ElementContainer), nameof(ElementContainer.ModExp))]
-    public static void ElementContainerModExp_Prefix(ref ElementContainer __instance, int ele, ref int a, bool chain)
+    public static void ElementContainerModExp_Prefix(ref ElementContainer __instance, int ele, ref float a, bool chain)
     {
         var chara = __instance.Chara;
         var element = __instance.GetElement(ele);
@@ -26,34 +26,36 @@ public class ElementContainerPatches
     public static IEnumerable<CodeInstruction> ElementContainerModExp_Transpiler(IEnumerable<CodeInstruction> instructions)
     {
         return new CodeMatcher(instructions)
-            // float num2 = (float) a * (float) Mathf.Clamp(num1, 10, 1000) / (float) (100 + Mathf.Max(0, element.ValueWithoutLink) * 25);
-            .MatchForward(false,
-                new CodeMatch(OpCodes.Ldloc_1),
-                new CodeMatch(OpCodes.Ldc_I4_S),
-                new CodeMatch(OpCodes.Ldc_I4),
-                new CodeMatch(OpCodes.Call)
-            )
-            .Advance(2)
-            .SetOperandAndAdvance(PluginSettings.MaxPotential.Value)
-            // element.vTempPotential -= element.vTempPotential / 4 + EClass.rnd(5) + 5;
-            .MatchForward(false,
-                new CodeMatch(OpCodes.Ldloc_0),
-                new CodeMatch(OpCodes.Dup),
-                new CodeMatch(OpCodes.Ldfld),
-                new CodeMatch(OpCodes.Ldloc_0),
-                new CodeMatch(OpCodes.Ldfld),
-                new CodeMatch(OpCodes.Ldc_I4_4),
-                new CodeMatch(OpCodes.Div),
-                new CodeMatch(OpCodes.Ldc_I4_5),
-                new CodeMatch(OpCodes.Call),
-                new CodeMatch(OpCodes.Add),
-                new CodeMatch(OpCodes.Ldc_I4_5),
-                new CodeMatch(OpCodes.Add))
-            .Advance(4)
-            .RemoveInstructions(8)
-            .InsertAndAdvance(
-                new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(ElementContainerPatches), nameof(PotentialLossValue), [typeof(Element)])))
-            .InstructionEnumeration();
+        // float a = (float) a * (float) Mathf.Clamp(element.UsePotential ? element.Potential : 100, 10, 1000) / (float) (100 + Mathf.Max(0, element.ValueWithoutLink) * 25);
+        .MatchForward(false,
+            new CodeMatch(OpCodes.Callvirt),
+            new CodeMatch(OpCodes.Ldc_I4_S),
+            new CodeMatch(OpCodes.Ldc_I4),
+            new CodeMatch(OpCodes.Call))
+        .Advance(2)
+        .SetOperandAndAdvance(PluginSettings.MaxPotential.Value)
+        // element.vTempPotential -= element.vTempPotential / 4 + EClass.rnd(5) + 5;
+        .MatchForward(false,
+            new CodeMatch(OpCodes.Ldloc_0),
+            new CodeMatch(OpCodes.Dup),
+            new CodeMatch(OpCodes.Ldfld),
+            new CodeMatch(OpCodes.Ldloc_0),
+            new CodeMatch(OpCodes.Ldfld),
+            new CodeMatch(OpCodes.Ldc_I4_4),
+            new CodeMatch(OpCodes.Div),
+            new CodeMatch(OpCodes.Ldc_I4_5),
+            new CodeMatch(OpCodes.Call),
+            new CodeMatch(OpCodes.Add),
+            new CodeMatch(OpCodes.Ldc_I4_5),
+            new CodeMatch(OpCodes.Add),
+            new CodeMatch(OpCodes.Sub))
+        .Advance(3)
+        .RemoveInstructions(10)
+        .InsertAndAdvance(
+            new CodeInstruction(OpCodes.Ldloc_0),
+            new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(ElementContainerPatches), nameof(PotentialLossValue), new[] { typeof(Element) })),
+            new CodeInstruction(OpCodes.Sub)
+        ).InstructionEnumeration();
     }
 
     [HarmonyPrefix]
@@ -65,7 +67,7 @@ public class ElementContainerPatches
 
         if (chara == null || !chara.isChara || chara.isDead || element == null) return;
 
-        v = ResultMultipliedValue(element, v, PotentialMultiplierValueResolver, ResultValueResolver);
+        v = Mathf.RoundToInt(ResultMultipliedValue(element, v, PotentialMultiplierValueResolver, ResultValueResolver));
     }
 
     [HarmonyTranspiler]
@@ -97,7 +99,7 @@ public class ElementContainerPatches
 
         if (chara == null || !chara.isChara || chara.isDead || element == null) return;
 
-        v = ResultMultipliedValue(element, v, PotentialMultiplierValueResolver, ResultValueResolver);
+        v = Mathf.RoundToInt(ResultMultipliedValue(element, v, PotentialMultiplierValueResolver, ResultValueResolver));
     }
 
     [HarmonyTranspiler]
@@ -125,10 +127,10 @@ public class ElementContainerPatches
     {
         var value = element.vTempPotential / 4 + EClass.rnd(5) + 5;
 
-        return ResultMultipliedValue(element, value, PotentialLossMultiplierValueResolver, ResultValueResolver);
+        return Mathf.RoundToInt(ResultMultipliedValue(element, value, PotentialLossMultiplierValueResolver, ResultValueResolver));
     }
 
-    private static int ResultMultipliedValue(Element element, int value, Func<Element, int, int> multiplierResolver, Func<Chara, int, int, int> resultValueResolver)
+    private static float ResultMultipliedValue(Element element, float value, Func<Element, float, float> multiplierResolver, Func<Chara, float, float, float> resultValueResolver)
     {
         var chara = element.owner?.Chara;
         if (chara == null || !chara.isChara || chara.isDead) return value;
@@ -139,7 +141,7 @@ public class ElementContainerPatches
         return resultValue;
     }
 
-    private static int ResultValueResolver(Chara chara, int value, int multipliedValue)
+    private static float ResultValueResolver(Chara chara, float value, float multipliedValue)
     {
         var resultValue = value;
 
@@ -182,7 +184,7 @@ public class ElementContainerPatches
         return resultValue;
     }
 
-    private static int ExperienceMultiplierValueResolver(Element element, int value)
+    private static float ExperienceMultiplierValueResolver(Element element, float value)
     {
         var multiplier = 1.0f;
 
@@ -231,10 +233,10 @@ public class ElementContainerPatches
             multiplier = PluginSettings.ExperienceMultiplierSpellAbility.Value;
         }
 
-        return Mathf.RoundToInt(value * multiplier);
+        return value * multiplier;
     }
 
-    private static int PotentialMultiplierValueResolver(Element element, int value)
+    private static float PotentialMultiplierValueResolver(Element element, float value)
     {
         var multiplier = 1.0f;
 
@@ -283,10 +285,10 @@ public class ElementContainerPatches
             multiplier = PluginSettings.PotentialMultiplierSpellAbility.Value;
         }
 
-        return Mathf.RoundToInt(value * multiplier);
+        return value * multiplier;
     }
 
-    private static int PotentialLossMultiplierValueResolver(Element element, int value)
+    private static float PotentialLossMultiplierValueResolver(Element element, float value)
     {
         var multiplier = 1.0f;
 
@@ -335,6 +337,6 @@ public class ElementContainerPatches
             multiplier = PluginSettings.PotentialLossMultiplierSpellAbility.Value;
         }
 
-        return Mathf.RoundToInt(value * multiplier);
+        return value * multiplier;
     }
 }
